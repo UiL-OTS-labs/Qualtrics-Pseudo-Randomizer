@@ -38,14 +38,25 @@ function QuestionBlock(identifier, group, use_buttons) {
         this.questions.push(question)
     }
 
+    /**
+     * Returns the last question in this block.
+     * Used mostly because we hijack the last question's container to add a button.
+     * @return {QuestionInfo}
+     */
     this.getLast = function () {
         return this.questions[this.questions.length - 1];
     }
 
+    /**
+     * Shows all questions in this block
+     */
     this.show = function () {
         this.questions.forEach(el => el.container.show());
     }
 
+    /**
+     * Hides all questions in this block
+     */
     this.hide = function () {
         this.questions.forEach(el => el.container.hide());
     }
