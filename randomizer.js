@@ -7,15 +7,48 @@ Array.prototype.sample = function(){
  * Object to hold all data needed for a question. You should not use this yourself, it's created by the Randomizer.
  * @class
  * @param question {QuestionData} The Qualtrics API object for the question
- * @param group {string} The group this question belongs to
  * @param container {Element} The jQuery Element for the div containing this question
- * @param use_buttons {boolean} If this question should use buttons. If false, it will go to the next question in click
+ * @param blockID {string} The ID of the block this question belongs to
  */
-function QuestionInfo(question, group, container, use_buttons) {
+function QuestionInfo(question, container, blockID) {
     this.question = question;
-    this.group = group;
     this.container = container;
+    this.blockID = blockID;
+}
+
+/**
+ * Object to manage question blocks. Blocks contain at least one question, and are the objects that are actually ordered.
+ * Ordering on blocks allow for multiple questions to be displayed together at the same time.
+ * @param identifier
+ * @param group
+ * @param use_buttons
+ * @constructor
+ */
+function QuestionBlock(identifier, group, use_buttons) {
+    this.identifier = identifier
+    this.group = group;
     this.use_buttons = use_buttons;
+    this.questions = []
+
+    /**
+     *
+     * @param question {QuestionInfo}
+     */
+    this.addQuestion = function (question) {
+        this.questions.push(question)
+    }
+
+    this.getLast = function () {
+        return this.questions[this.questions.length - 1];
+    }
+
+    this.show = function () {
+        this.questions.forEach(el => el.container.show());
+    }
+
+    this.hide = function () {
+        this.questions.forEach(el => el.container.hide());
+    }
 }
 
 /**
@@ -29,11 +62,13 @@ function QuestionInfo(question, group, container, use_buttons) {
  */
 function Randomizer(max_same_items = 2, use_buttons=true, randomize_algorithm='general', debug=false)
 {
-    // List of all QuestionInfo objects
-    this.questions = [];
+    // List used to contain the order to be used
+    this.order = [];
+    // Dict of all blocks
+    this.blocks = {};
     // If by default, we should use buttons to advance to the next question
     this.use_buttons = use_buttons;
-    // Index of the **last** question.
+    // Index of the **previous** question.
     this.n = 0
     // The randomize algorithm to use
     this.algorithm = randomize_algorithm;
@@ -41,15 +76,25 @@ function Randomizer(max_same_items = 2, use_buttons=true, randomize_algorithm='g
     this.max_same_items = max_same_items;
     // Should be self-explaining
     this.debug = debug
+    // If the randomizer is locked, no questions can be added anymore
+    this.locked = false;
 
     /**
      * This method is used to register a question. Should be called from Qualtrics.SurveyEngine.addOnload
      * @param q {QuestionData} Qualtrics API object. Just fill in 'this' (without the quotation marks).
      * @param group {string} The group this question belongs to. Can be anything, if used consistently.
+     * @param block {string} Optional, the name of the block of questions. Can be used to group questions together.
      * @param use_buttons {undefined|boolean} (Optional) This can be used to force buttons/no buttons usage for this question. If
      * not provided, the default set for this randomizer will be used.
      */
-    this.addQuestion = function (q, group, use_buttons=undefined) {
+    this.addQuestion = function (q, group, block = undefined, use_buttons=undefined) {
+        // If the randomizer is locked, no questions can be added anymore
+        if (this.locked)
+            return;
+
+        // Hide the Qualtrics button. We use our own.
+        q.hideNextButton();
+
         // Get the jQuery element which holds this question. Luckily, Qualtrics uses the questionId as the HTML id value.
         let container = jQuery("#"+q.questionId);
         container.hide();
@@ -58,30 +103,75 @@ function Randomizer(max_same_items = 2, use_buttons=true, randomize_algorithm='g
         if(use_buttons === undefined)
             use_buttons = this.use_buttons
 
-        // Create the info object and save it
-        let info = new QuestionInfo(q, group, container, use_buttons);
-        this.questions.push(info);
+        // Get the block for this question
+        let qBlock = this._getOrCreateBlock(block, group, use_buttons);
 
-        // Add the correct buttons/event handlers for progression
-        this._add_flow_control(info);
+        // Create the info object and save it
+        let info = new QuestionInfo(q, container, qBlock.identifier);
+        qBlock.addQuestion(info);
     }
 
     /**
-     * This private method makes sure progressing between questions is possible. There are two options:
+     * Tries to get an existing block if it exists. Creates a new block if needed.
+     * @param block The block identifier
+     * @param group The group that this block belongs to. Note: the first question in the block dictates the group
+     * @return {QuestionBlock|*}
+     * @private
+     */
+    this._getOrCreateBlock = function (block, group) {
+        // If the user didn't supply a block name, generate a random one
+        if (block === undefined)
+            block = this._generateRandomBlockID();
+
+        // If it already exists, return the existing one
+        if (this.blocks[block] !== undefined)
+            return this.blocks[block];
+
+        // Otherwise, create one
+        let qBlock = new QuestionBlock(block, group, use_buttons);
+        this.blocks[block] = qBlock;
+
+        return qBlock;
+    }
+
+    /**
+     * Tries to make a unique identifier if none was supplied by the user
+     * @return {string}
+     * @private
+     */
+    this._generateRandomBlockID = function () {
+        let id = Math.random().toString(36).substring(7);
+
+        if(this.blocks[id] === undefined)
+            return id;
+
+        return this._generateRandomBlockID();
+    }
+
+    /**
+     * Adds the necessary events/buttons for flow control to all blocks.
+     */
+    this.addFlowControls = function () {
+        for(var key in this.blocks)
+        {
+            let block = this.blocks[key];
+            this._addFlowControl(block.getLast(), block.use_buttons);
+        }
+    }
+
+    /**
+     * This private method makes sure progressing between blocks is possible. There are two options:
      * - Using buttons, which will add a HTML button and register an event handler to said button. (Default behaviour)
      * - Using click, which will use Qualtrics 'questionclick' event to call randomizer.step().
      * Note: the click method only makes sense with a multiple choice question.
      * @param questionInfo {QuestionInfo} The info object for this question
      * @private
      */
-    this._add_flow_control = function (questionInfo) {
+    this._addFlowControl = function (questionInfo, use_buttons) {
         let randomizer = this;
         let question = questionInfo.question;
 
-        if(this.questions.length === 1)
-            question.hideNextButton();
-
-        if (questionInfo.use_buttons) {
+        if (use_buttons) {
             let buttonContainer = jQuery("<div class='Buttons'></div>");
             let button = jQuery("<input style=\"float:right;\" disabled=\"disabled\" title=\"→\" type=\"button\" name=\"NextButton\" value=\"→\">")
 
@@ -106,7 +196,7 @@ function Randomizer(max_same_items = 2, use_buttons=true, randomize_algorithm='g
     }
 
     /**
-     * This method will call the selected randomize algorithm and randomize the questions.
+     * This method will call the selected randomize algorithm and randomize the blocks.
      * You really should just call randomizer.start(), which will also call this method.
      */
     this.randomize = function () {
@@ -127,17 +217,16 @@ function Randomizer(max_same_items = 2, use_buttons=true, randomize_algorithm='g
             return;
         }
 
-        // Copy the questions to avoid meddling with the original list
-        let c = this.questions.slice();
-        let numItems = c.length;
+        let blockKeys = Object.keys(this.blocks);
+        let numItems = blockKeys.length;
         // Array to built the new order in.
-        let nq = [];
+        let order = [];
         let lastGroup = undefined;
         let numOfLastGroup = 0;
         // Number of attempts to find a fitting element. (NOT the amount of attempts to create a random order).
         let attempts = 0;
 
-        while (c.length > 0) {
+        while (blockKeys.length > 0) {
             // Re-try if we have more attempts to find a fitting question than twice all the questions.
             // In this case, the randomize algorithm has made previous choices which prohibit finishing.
             if (attempts === (numItems*2))
@@ -148,16 +237,20 @@ function Randomizer(max_same_items = 2, use_buttons=true, randomize_algorithm='g
                 return;
             }
 
-            // Pick a random item from the original array
-            let el = c.sample();
+            // Pick a random item
+            let key = blockKeys.sample();
+            let el = this.blocks[key];
+
+            if(this.debug)
+                console.log("Picked block " + key + ", group " + el.group)
 
             // If this element belongs to a different group than last OR we haven't reached the limit of successive items
             if (el.group !== lastGroup || (el.group === lastGroup && numOfLastGroup < this.max_same_items))
             {
                 // Add it to the order
-                nq.push(el);
-                // Remove it from the original array
-                c.splice(c.indexOf(el), 1);
+                order.push(el);
+                // Remove it from the original list
+                blockKeys.splice(blockKeys.indexOf(key), 1);
 
                 // If this group isn't the same as last, reset
                 if(el.group !== lastGroup)
@@ -182,20 +275,25 @@ function Randomizer(max_same_items = 2, use_buttons=true, randomize_algorithm='g
             }
         }
 
-        this.questions = nq;
+        this.order = order;
         if(this.debug)
             this._print_chosen_order()
     }
 
+    /**
+     * Not implemented. Might be used to implement the algorithm from ZEP if the general one isn't working right
+     */
     this.randomize_zep = function () {
         // NOT IMPLEMENTED
     }
 
     /**
-     * This method will randomize the order, and display the first question.
+     * This method will randomize the order, add flow controls, and display the first question.
      * Read: use this to start the questions
      */
     this.start = function () {
+        this.locked = true;
+        this.addFlowControls();
         this.randomize();
         this.step();
     }
@@ -206,41 +304,40 @@ function Randomizer(max_same_items = 2, use_buttons=true, randomize_algorithm='g
      */
     this._print_chosen_order = function() {
         console.log("Chosen order:");
-        this.questions.forEach(el => console.log("QuestionId: " + el.question.questionId + "; Group: " +el.group));
+        this.order.forEach(el => console.log("BlockID: " + el.identifier + "; Group: " +el.group));
         console.log("End");
     }
 
     /**
-     * This method will display the next question, and enable the Qualtrics next button if it's the last question.
+     * This method will display the next block, and enable the Qualtrics next button if it's the last block.
      * @returns {undefined|QuestionInfo} The questionInfo object for the new question
      */
     this.step = function () {
         // Hide the last question, if there is any.
         if(this.n > 0)
         {
-            let last_question = this.questions[this.n - 1]
-            last_question.container.hide();
+            this.order[this.n - 1].hide();
         }
         // Do nothing if our next index is one above the index of the last question, we're at the last question
-        if(this.questions.length > this.n) {
-            // Get the new question and increment n
-            let q = this.questions[this.n]
+        if(this.order.length > this.n) {
+            // Get the new block and increment n
+            let block = this.order[this.n]
             this.n += 1;
 
-            // Show this question
-            jQuery("#"+q.question.questionId).show();
+            // Show this block
+            block.show();
 
             // Note, while this.n is an index, we can compare this with length as it's already incremented by 1
-            if(this.questions.length === this.n)
+            if(this.order.length === this.n)
             {
                 // If this is the last question, show Qualtrics' next button and hide our own button if present.
-                q.question.showNextButton();
-                if(!q.use_buttons) {
-                    q.container.find(".Buttons").hide();
+                block.getLast().question.showNextButton();
+                if(block.use_buttons) {
+                    block.getLast().container.find(".Buttons").hide();
                 }
             }
 
-            return q
+            return block
         }
         return undefined
     }
