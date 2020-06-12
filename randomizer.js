@@ -52,6 +52,8 @@ function QuestionBlock(identifier, group, use_buttons) {
      */
     this.show = function () {
         this.questions.forEach(el => el.container.show());
+
+        document.getElementById(this.questions[0].question.questionId).scrollIntoView();
     }
 
     /**
