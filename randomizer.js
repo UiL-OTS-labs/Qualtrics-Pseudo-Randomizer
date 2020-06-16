@@ -53,6 +53,11 @@ function QuestionBlock(identifier, group, use_buttons) {
     this.show = function () {
         this.questions.forEach(el => el.container.show());
 
+        let button = this.getButtonElement();
+        // Hide the button if there exists one
+        if(button)
+            button.show();
+
         document.getElementById(this.questions[0].question.questionId).scrollIntoView();
     }
 
@@ -61,6 +66,15 @@ function QuestionBlock(identifier, group, use_buttons) {
      */
     this.hide = function () {
         this.questions.forEach(el => el.container.hide());
+        let button = this.getButtonElement();
+        // Hide the button if there exists one
+        if(button)
+            button.hide();
+    }
+
+    this.getButtonElement = function () {
+        let questionId = this.getLast().question.questionId;
+        return jQuery("div[data-question-id=" + questionId + "]");
     }
 }
 
@@ -185,7 +199,7 @@ function Randomizer(max_same_items = 2, use_buttons=true, randomize_algorithm='g
         let question = questionInfo.question;
 
         if (use_buttons) {
-            let buttonContainer = jQuery("<div class='Buttons'></div>");
+            let buttonContainer = jQuery("<div class='Buttons' data-question-id='" + question.questionId + "'></div>");
             let button = jQuery("<input style=\"float:right;\" disabled=\"disabled\" title=\"→\" type=\"button\" name=\"NextButton\" value=\"→\">")
 
             question.questionclick = function () {
@@ -196,7 +210,8 @@ function Randomizer(max_same_items = 2, use_buttons=true, randomize_algorithm='g
             });
 
             buttonContainer.append(button);
-            questionInfo.container.append(buttonContainer);
+            questionInfo.container.parent().append(buttonContainer);
+            buttonContainer.hide();
         } else {
             question.hasFired = false;
             question.questionclick = function () {
@@ -346,7 +361,7 @@ function Randomizer(max_same_items = 2, use_buttons=true, randomize_algorithm='g
                 // If this is the last question, show Qualtrics' next button and hide our own button if present.
                 block.getLast().question.showNextButton();
                 if(block.use_buttons) {
-                    block.getLast().container.find(".Buttons").hide();
+                    block.getButtonElement().hide();
                 }
             }
 
