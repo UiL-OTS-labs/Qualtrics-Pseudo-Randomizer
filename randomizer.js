@@ -28,7 +28,8 @@ function QuestionBlock(identifier, group, use_buttons) {
     this.identifier = identifier
     this.group = group;
     this.use_buttons = use_buttons;
-    this.questions = []
+    this.questions = [];
+    this.filledInQuestions = [];
 
     /**
      *
@@ -36,6 +37,7 @@ function QuestionBlock(identifier, group, use_buttons) {
      */
     this.addQuestion = function (question) {
         this.questions.push(question)
+        this.filledInQuestions.push(false);
     }
 
     /**
@@ -70,6 +72,27 @@ function QuestionBlock(identifier, group, use_buttons) {
         // Hide the button if there exists one
         if(button)
             button.hide();
+    }
+
+    this.onQuestionFill = function (question, randomizer) {
+        let index = this.questions.indexOf(question);
+        this.filledInQuestions[index] = true;
+
+        if (this.canProgress())
+        {
+            if (this.use_buttons)
+            {
+                this.getButtonElement().find("input").prop('disabled', false);
+            }
+            else
+            {
+                randomizer.step();
+            }
+        }
+    }
+
+    this.canProgress = function () {
+        return this.filledInQuestions.every(v => v);
     }
 
     this.getButtonElement = function () {
@@ -182,7 +205,7 @@ function Randomizer(max_same_items = 2, use_buttons=true, randomize_algorithm='g
         for(var key in this.blocks)
         {
             let block = this.blocks[key];
-            this._addFlowControl(block.getLast(), block.use_buttons);
+            this._addFlowControl(block, block.use_buttons);
         }
     }
 
@@ -191,35 +214,31 @@ function Randomizer(max_same_items = 2, use_buttons=true, randomize_algorithm='g
      * - Using buttons, which will add a HTML button and register an event handler to said button. (Default behaviour)
      * - Using click, which will use Qualtrics 'questionclick' event to call randomizer.step().
      * Note: the click method only makes sense with a multiple choice question.
-     * @param questionInfo {QuestionInfo} The info object for this question
+     * @param questionBlock {QuestionBlock} The info object for this question
      * @private
      */
-    this._addFlowControl = function (questionInfo, use_buttons) {
+    this._addFlowControl = function (questionBlock, use_buttons) {
         let randomizer = this;
-        let question = questionInfo.question;
+
+        questionBlock.questions.forEach(q => {
+            let question = q.question;
+            question.questionclick = function () {
+                questionBlock.onQuestionFill(q, randomizer);
+            };
+        })
 
         if (use_buttons) {
-            let buttonContainer = jQuery("<div class='Buttons' data-question-id='" + question.questionId + "'></div>");
+            let question = questionBlock.getLast();
+            let buttonContainer = jQuery("<div class='Buttons' data-question-id='" + question.question.questionId + "'></div>");
             let button = jQuery("<input style=\"float:right;\" disabled=\"disabled\" title=\"→\" type=\"button\" name=\"NextButton\" value=\"→\">")
 
-            question.questionclick = function () {
-                button.prop('disabled', false);
-            };
             button.click(function () {
                 randomizer.step();
             });
 
             buttonContainer.append(button);
-            questionInfo.container.parent().append(buttonContainer);
+            question.container.parent().append(buttonContainer);
             buttonContainer.hide();
-        } else {
-            question.hasFired = false;
-            question.questionclick = function () {
-                if (this.hasFired)
-                    return;
-                this.hasFired = true
-                randomizer.step();
-            }
         }
     }
 
