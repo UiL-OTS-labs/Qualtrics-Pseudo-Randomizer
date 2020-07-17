@@ -74,7 +74,10 @@ function QuestionBlock(identifier, group, use_buttons) {
             button.hide();
     }
 
-    this.onQuestionFill = function (question, randomizer) {
+    this.onQuestionClick = function (question, randomizer, event, element) {
+        if(!this._isQuestionFilled(question, event, element))
+            return;
+
         let index = this.questions.indexOf(question);
         this.filledInQuestions[index] = true;
 
@@ -88,6 +91,18 @@ function QuestionBlock(identifier, group, use_buttons) {
             {
                 randomizer.step();
             }
+        }
+    }
+
+    this._isQuestionFilled = function(q, event, element)
+    {
+        if (element.type === 'radio')
+        {
+            return true;
+        }
+        else
+        {
+            return q.question.getTextValue() != "";
         }
     }
 
@@ -222,8 +237,8 @@ function Randomizer(max_same_items = 2, use_buttons=true, randomize_algorithm='g
 
         questionBlock.questions.forEach(q => {
             let question = q.question;
-            question.questionclick = function () {
-                questionBlock.onQuestionFill(q, randomizer);
+            question.questionclick = function (event, element) {
+                questionBlock.onQuestionClick(q, randomizer, event, element);
             };
         })
 
